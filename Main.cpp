@@ -6,7 +6,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// Define esto antes del include si stb_image.h no está precompilado en otro lado
 #define STB_IMAGE_IMPLEMENTATION 
 #include <stb/stb_image.h>
 
@@ -47,20 +46,24 @@ const char* vertexShaderSource = R"glsl(
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec2 aTexCoord;
     layout (location = 2) in vec3 aNormal;
+    layout (location = 3) in vec3 aTangent;
 
     out vec3 FragPos;
-    out vec3 Normal;
     out vec2 TexCoord;
+    out mat3 TBN;
 
-    uniform mat4 model;
-    uniform mat4 view;
-    uniform mat4 projection;
+    uniform mat4 model, view, projection;
 
     void main() {
         gl_Position = projection * view * model * vec4(aPos, 1.0);
         FragPos = vec3(model * vec4(aPos, 1.0));
-        Normal = mat3(transpose(inverse(model))) * aNormal;
         TexCoord = aTexCoord;
+
+        vec3 T = normalize(vec3(model * vec4(aTangent, 0.0)));
+        vec3 N = normalize(vec3(model * vec4(aNormal, 0.0)));
+        T = normalize(T - dot(T, N) * N);
+        vec3 B = cross(N, T);
+        TBN = mat3(T, B, N);
     }
 )glsl";
 
@@ -70,28 +73,31 @@ const char* fragmentShaderSource = R"glsl(
     out vec4 FragColor;
 
     in vec2 TexCoord;
-    in vec3 Normal;
+    in mat3 TBN;
     in vec3 FragPos;
 
-    uniform sampler2D texture1;
+    uniform sampler2D diffuseMap;
+    uniform sampler2D normalMap;
     uniform vec3 lightPos;
     uniform vec3 lightColor;
 
     void main() {
-    
-    float ambientStrength = 0.1;
-    vec3 ambient = ambientStrength * lightColor;
+        // 1. Extraer el mapa de normales de la imagen azul y ajustarlo
+        vec3 normal = texture(normalMap, TexCoord).rgb;
+        normal = normalize(normal * 2.0 - 1.0);
 
-    vec3 norm = normalize(Normal);
-    vec3 lightDir = normalize(lightPos - FragPos);
-    
-    float diff = max(dot(norm, lightDir), 0.0);
-    vec3 diffuse = diff * lightColor;
+        // 2. Alinear la normal plana con la geometría 3D
+        normal = normalize(TBN * normal);
 
-    vec3 result = (ambient + diffuse);
-    
-    vec4 texColor = texture(texture1, TexCoord);
-        FragColor = vec4(result * texColor.rgb, texColor.a);
+        // 3. Calcular la luz direccional y ambiental
+        vec3 ambient = 0.1 * lightColor;
+        vec3 lightDir = normalize(lightPos - FragPos);
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 diffuse = diff * lightColor;
+
+        vec4 texColor = texture(diffuseMap, TexCoord);
+        FragColor = vec4((ambient + diffuse) * texColor.rgb, texColor.a);
+        //FragColor = texture(normalMap, TexCoord);
     }
 )glsl";
 
@@ -118,6 +124,7 @@ int main() {
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragmentShader);
+
     int success;
     char infoLog[512];
     glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
@@ -132,33 +139,32 @@ int main() {
     glLinkProgram(shaderProgram);
     glDeleteShader(vertexShader); glDeleteShader(fragmentShader);
 
-    // --- VÉRTICES Y UV (Sin EBO) ---
+    // --- VÉRTICES Y UV ---
     float vertices[] = {
-        // Posiciones          // Texturas (UV)
+        // Posiciones          // Texturas (UV)   // Normales       // Tangentes
         // Cara Frontal
-        -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.0f, 0.5f, 0.8f,
-         0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, 0.5f, 0.8f,
-         0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, 0.8f,
+        -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
+         0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
+         0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
          // Cara Derecha
-          0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.8f, 0.5f, 0.0f,
-          0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.8f, 0.5f, 0.0f,
-          0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.8f, 0.5f, 0.0f,
+          0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
+          0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
+          0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
           // Cara Trasera
-           0.5f, 0.0f, -0.5f,    0.0f, 0.0f,  0.0f, 0.5f, -0.8f,
-          -0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.0f, 0.5f, -0.8f,
-           0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, -0.8f,
+           0.5f, 0.0f, -0.5f,    0.0f, 0.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
+          -0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
+           0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
            // Cara Izquierda
-           -0.5f, 0.0f, -0.5f,    0.0f, 0.0f,   -0.8f, 0.5f, 0.0f,
-           -0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   -0.8f, 0.5f, 0.0f,
-            0.0f, 0.8f,  0.0f,    0.5f, 1.0f,   -0.8f, 0.5f, 0.0f,
-            // Base (2 triángulos) 
-            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,   0.0f, -1.0f, 0.0f,
-             0.5f, 0.0f, -0.5f,    1.0f, 1.0f,   0.0f, -1.0f, 0.0f,
-             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   0.0f, -1.0f, 0.0f,
-             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   0.0f, -1.0f, 0.0f,
-            -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,   0.0f, -1.0f, 0.0f,
-            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,   0.0f, -1.0f, 0.0f
-
+           -0.5f, 0.0f, -0.5f,    0.0f, 0.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
+           -0.5f, 0.0f,  0.5f,    1.0f, 0.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
+            0.0f, 0.8f,  0.0f,    0.5f, 1.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
+            // Base 
+            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f, -0.5f,    1.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+            -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
+            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f
     };
 
     GLuint VAO, VBO;
@@ -169,45 +175,71 @@ int main() {
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    // Atributo 0: Posición (X, Y, Z) - Salto de 8 floats, empieza en 0
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Atributo 1: Textura (U, V) - Salto de 8 floats, empieza después de 3 floats
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // Atributo 2: Normales (NX, NY, NZ) - Salto de 8 floats, empieza después de 5 floats (Pos + Tex)
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(5 * sizeof(float)));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(5 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
-    // --- CARGAR TEXTURA ---
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(8 * sizeof(float)));
+    glEnableVertexAttribArray(3);
+
+
+    // --- CARGAR TEXTURAS ---
+    GLuint textureDiffuse, textureNormal;
+    glGenTextures(1, &textureDiffuse);
+    glGenTextures(1, &textureNormal);
+
+    int width, height, nrChannels;
+    stbi_set_flip_vertically_on_load(true);
+
+    // 1. TEXTURA ORIGINAL (LADRILLOS)
+    glBindTexture(GL_TEXTURE_2D, textureDiffuse);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    stbi_set_flip_vertically_on_load(true); // Evita que la textura salga de cabeza
-    int width, height, nrChannels;
-    unsigned char* data = stbi_load("C:\\Users\\Santiago\\source\\repos\\proyectoejemplo1\\Resources\\image2.jpg", &width, &height, &nrChannels, 0);
-    if (data) {
-        // Si tu imagen fuera PNG, cambia GL_RGB por GL_RGBA
+    unsigned char* dataDiffuse = stbi_load("C:\\Users\\Santiago\\source\\repos\\proyectoejemplo1\\Resources\\image2.jpg", &width, &height, &nrChannels, 0);
+    if (dataDiffuse) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+        GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, dataDiffuse);
         glGenerateMipmap(GL_TEXTURE_2D);
     }
     else {
-        std::cout << "Fallo al cargar la textura" << std::endl;
+        std::cout << "Fallo al cargar la textura de ladrillos" << std::endl;
     }
-    stbi_image_free(data);
+    stbi_image_free(dataDiffuse);
+
+    // 2. TEXTURA DE NORMALES (AZUL)
+    glBindTexture(GL_TEXTURE_2D, textureNormal);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    unsigned char* dataNormal = stbi_load("C:\\Users\\Santiago\\source\\repos\\proyectoejemplo1\\Resources\\image2_normal2.png", &width, &height, &nrChannels, 0);
+    if (dataNormal) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        GLenum format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, dataNormal);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+    else {
+        std::cout << "Fallo al cargar el mapa de normales" << std::endl;
+    }
+    stbi_image_free(dataNormal);
+
+    // --- CONFIGURACIÓN PREVIA AL BUCLE ---
+    glUseProgram(shaderProgram);
+    glUniform1i(glGetUniformLocation(shaderProgram, "diffuseMap"), 0);
+    glUniform1i(glGetUniformLocation(shaderProgram, "normalMap"), 1);
 
     // --- LOOP PRINCIPAL ---
-    glUseProgram(shaderProgram);
-    glUniform1i(glGetUniformLocation(shaderProgram, "texture1"), 0);
-
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
@@ -221,26 +253,24 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
 
-        // Render
+        // Limpiar pantalla
         glClearColor(0.07f, 0.13f, 0.17f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        // Enlazar Texturas
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
+        glBindTexture(GL_TEXTURE_2D, textureDiffuse);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, textureNormal);
 
+        // Posición y color de la luz dinámica
+        glm::vec3 lightPos = cameraPos;
+        glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
+
+        // Enviar matrices y luz al Shader
         glUseProgram(shaderProgram);
-
-        // Define la posición de la luz (ej. un poco a la derecha, arriba y hacia adelante)
-        // Calcular una posición que gira en círculo a lo largo del tiempo
-        float time = glfwGetTime();
-        glm::vec3 lightPos(2.0f * sin(time), 1.0f, 2.0f * cos(time));
-        glm::vec3 lightColor(1.0f, 1.0f, 1.0f); // Luz completamente blanca
-
-        GLint lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
-        GLint lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
-
-        glUniform3f(lightPosLoc, lightPos.x, lightPos.y, lightPos.z);
-        glUniform3f(lightColorLoc, lightColor.x, lightColor.y, lightColor.z);
+        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), lightPos.x, lightPos.y, lightPos.z);
+        glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
 
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
         glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
@@ -250,6 +280,7 @@ int main() {
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(model));
 
+        // Dibujar (Una sola vez por frame)
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, 18);
 
