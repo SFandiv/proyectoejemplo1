@@ -6,6 +6,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "Model.h"
+
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
 #define STB_IMAGE_IMPLEMENTATION 
 #include <stb/stb_image.h>
 
@@ -115,6 +121,14 @@ int main() {
 
     if (!gladLoadGL()) { std::cout << "Error GLAD\n"; return -1; }
     glEnable(GL_DEPTH_TEST);
+
+    Model fox("Models/Fox.glb");
+
+    // --- PRUEBA DE ASSIMP ---
+
+    Assimp::Importer importer;
+
+    std::cout << "Assimp funciona correctamente!" << std::endl;
 
     // --- COMPILAR SHADERS ---
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
@@ -283,6 +297,45 @@ int main() {
         // Dibujar (Una sola vez por frame)
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, 18);
+
+        // Matriz del modelo del zorro
+        glm::mat4 foxModel = glm::mat4(1.0f);
+
+        // Posicionar el zorro
+        foxModel = glm::translate(
+            foxModel,
+            glm::vec3(1.5f, -0.5f, 0.0f)
+        );
+
+        // Reducir su tamaño
+        foxModel = glm::scale(
+            foxModel,
+            glm::vec3(0.01f)
+        );
+
+        // Enviar la matriz al shader
+        glUniformMatrix4fv(
+            glGetUniformLocation(shaderProgram, "model"),
+            1,
+            GL_FALSE,
+            glm::value_ptr(foxModel)
+        );  
+        // Desvincular el normal map de la pirámide por seguridad antes de dibujar el zorro
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        // Dibujar el zorro pasando el shader
+        fox.Draw(shaderProgram);
+
+        // Restaurar la matriz original para otros objetos
+        glm::mat4 identity = glm::mat4(1.0f);
+
+        glUniformMatrix4fv(
+            glGetUniformLocation(shaderProgram, "model"),
+            1,
+            GL_FALSE,
+            glm::value_ptr(identity)
+        );
 
         glfwSwapBuffers(window);
         glfwPollEvents();
