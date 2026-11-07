@@ -1,4 +1,3 @@
-
 #include "Mesh.h"
 
 Mesh::Mesh(
@@ -70,20 +69,25 @@ Mesh::Mesh(
 
 void Mesh::Draw(unsigned int shaderProgram)
 {
+    bool hasNormalMap = false; // <-- Rastreador
+
     for (unsigned int i = 0; i < textures.size(); i++)
     {
         glActiveTexture(GL_TEXTURE0 + i);
 
-        // Emparejar el tipo de textura con las variables de tu shader
         if (textures[i].type == "texture_diffuse") {
             glUniform1i(glGetUniformLocation(shaderProgram, "diffuseMap"), i);
         }
         else if (textures[i].type == "texture_normal") {
             glUniform1i(glGetUniformLocation(shaderProgram, "normalMap"), i);
+            hasNormalMap = true; // <-- ¡Encontramos uno!
         }
 
         glBindTexture(GL_TEXTURE_2D, textures[i].id);
     }
+
+    // Le decimos al shader si debe usar el cálculo complejo o el simple
+    glUniform1i(glGetUniformLocation(shaderProgram, "useNormalMap"), hasNormalMap ? 1 : 0);
 
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
