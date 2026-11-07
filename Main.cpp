@@ -25,6 +25,22 @@ float lastX = 400.0f, lastY = 300.0f;
 bool firstMouse = true;
 float deltaTime = 0.0f, lastFrame = 0.0f;
 
+glm::vec3 calculateCubicBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
+    // Fórmula: P(t) = (1-t)^3*P0 + 3*(1-t)^2*t*P1 + 3*(1-t)*t^2*P2 + t^3*P3
+    float u = 1.0f - t;
+    float tt = t * t;
+    float uu = u * u;
+    float uuu = uu * u;
+    float ttt = tt * t;
+
+    glm::vec3 p = uuu * p0; // Término 1
+    p += 3.0f * uu * t * p1; // Término 2
+    p += 3.0f * u * tt * p2; // Término 3
+    p += ttt * p3;           // Término 4
+
+    return p;
+}
+
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
     float xpos = static_cast<float>(xposIn);
     float ypos = static_cast<float>(yposIn);
@@ -236,6 +252,15 @@ int main() {
     else std::cout << "Fallo al cargar normal map\n";
     stbi_image_free(dataNormal);
 
+    // --- RUTAS DE CÁMARA (BÉZIER) ---
+    glm::vec3 p0(-4.0f, 2.0f, 4.0f);   // Punto de inicio (lejos y a la izquierda)
+    glm::vec3 p1(0.0f, 4.0f, 5.0f);    // Punto de control 1 (curva hacia arriba)
+    glm::vec3 p2(4.0f, 0.5f, 2.0f);    // Punto de control 2 (baja y se acerca por la derecha)
+    glm::vec3 p3(1.5f, -0.2f, 1.5f);   // Punto final (muy cerca de la cara del zorro)
+
+    float bezierTime = 0.0f;           // Progreso de la curva (0.0 a 1.0)
+    bool playIntro = true;             // Interruptor para la cinemática
+
     // --- LOOP PRINCIPAL ---
     while (!glfwWindowShouldClose(window)) {
         float currentFrame = glfwGetTime();
@@ -243,13 +268,31 @@ int main() {
         lastFrame = currentFrame;
 
         // Cámara
-        float cameraSpeed = 2.5f * deltaTime;
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cameraPos += cameraSpeed * cameraFront;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cameraPos -= cameraSpeed * cameraFront;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+        if (playIntro) {
+            // Avanzar el tiempo (velocidad de la cámara)
+            bezierTime += 0.2f * deltaTime; // 0.2f es la velocidad, ajústala a tu gusto
 
+            if (bezierTime >= 1.0f) {
+                bezierTime = 1.0f;
+                playIntro = false; // Termina la cinemática y te devuelve el control manual
+            }
+
+            // Calcular nueva posición en la curva
+            cameraPos = calculateCubicBezier(p0, p1, p2, p3, bezierTime);
+
+            // Obligar a la cámara a mirar al zorro
+            glm::vec3 foxTarget(1.5f, -0.5f, 0.0f);
+            cameraFront = glm::normalize(foxTarget - cameraPos);
+        }
+        else {
+
+            float cameraSpeed = 2.5f * deltaTime;
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cameraPos += cameraSpeed * cameraFront;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cameraPos -= cameraSpeed * cameraFront;
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+        }
         glClearColor(0.07f, 0.13f, 0.17f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
