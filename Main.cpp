@@ -7,6 +7,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Model.h"
+#include "Shader.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -26,17 +27,16 @@ bool firstMouse = true;
 float deltaTime = 0.0f, lastFrame = 0.0f;
 
 glm::vec3 calculateCubicBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3, float t) {
-    // Fórmula: P(t) = (1-t)^3*P0 + 3*(1-t)^2*t*P1 + 3*(1-t)*t^2*P2 + t^3*P3
     float u = 1.0f - t;
     float tt = t * t;
     float uu = u * u;
     float uuu = uu * u;
     float ttt = tt * t;
 
-    glm::vec3 p = uuu * p0; // Término 1
-    p += 3.0f * uu * t * p1; // Término 2
-    p += 3.0f * u * tt * p2; // Término 3
-    p += ttt * p3;           // Término 4
+    glm::vec3 p = uuu * p0;
+    p += 3.0f * uu * t * p1;
+    p += 3.0f * u * tt * p2;
+    p += ttt * p3;
 
     return p;
 }
@@ -62,72 +62,6 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
     cameraFront = glm::normalize(front);
 }
 
-// --- SHADERS ---
-const char* vertexShaderSource = R"glsl(
-    #version 330 core
-    layout (location = 0) in vec3 aPos;
-    layout (location = 1) in vec2 aTexCoord;
-    layout (location = 2) in vec3 aNormal;
-    layout (location = 3) in vec3 aTangent;
-
-    out vec3 FragPos;
-    out vec2 TexCoord;
-    out mat3 TBN;
-
-    uniform mat4 model, view, projection;
-
-    void main() {
-        gl_Position = projection * view * model * vec4(aPos, 1.0);
-        FragPos = vec3(model * vec4(aPos, 1.0));
-        TexCoord = aTexCoord;
-
-        vec3 T = normalize(vec3(model * vec4(aTangent, 0.0)));
-        vec3 N = normalize(vec3(model * vec4(aNormal, 0.0)));
-        T = normalize(T - dot(T, N) * N);
-        vec3 B = cross(N, T);
-        TBN = mat3(T, B, N);
-    }
-)glsl";
-
-const char* fragmentShaderSource = R"glsl(
-    #version 330 core
-
-    out vec4 FragColor;
-
-    in vec2 TexCoord;
-    in mat3 TBN;
-    in vec3 FragPos;
-
-    uniform sampler2D diffuseMap;
-    uniform sampler2D normalMap;
-    uniform bool useNormalMap;
-    
-    uniform vec3 lightPos;
-    uniform vec3 lightColor;
-
-    void main() {
-        vec3 normal;
-        
-        // 1. Decidir qué normal usar basado en si hay textura de relieve
-        if (useNormalMap) {
-            vec3 tangentNormal = texture(normalMap, TexCoord).rgb;
-            tangentNormal = tangentNormal * 2.0 - 1.0;
-            normal = normalize(TBN * tangentNormal);
-        } else {
-            normal = normalize(TBN[2]); 
-        }
-
-        // 2. Calcular la luz direccional y ambiental con la normal corregida
-        vec3 ambient = 0.1 * lightColor;
-        vec3 lightDir = normalize(lightPos - FragPos);
-        float diff = max(dot(normal, lightDir), 0.0);
-        vec3 diffuse = diff * lightColor;
-
-        vec4 texColor = texture(diffuseMap, TexCoord);
-        FragColor = vec4((ambient + diffuse) * texColor.rgb, texColor.a);
-    }
-)glsl";
-
 int main() {
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -148,55 +82,35 @@ int main() {
     Assimp::Importer importer;
     std::cout << "Assimp funciona correctamente!" << std::endl;
 
-    // --- COMPILAR SHADERS ---
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
-    glCompileShader(vertexShader);
-
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
-    glCompileShader(fragmentShader);
-
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR DE COMPILACION VERTEX SHADER:\n" << infoLog << std::endl;
-    }
-
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-    glDeleteShader(vertexShader); glDeleteShader(fragmentShader);
+    // --- COMPILAR SHADERS DESDE ARCHIVOS ---
+    Shader ourShader("Shaders/default.vert", "Shaders/default.frag");
 
     // --- VÉRTICES Y UV ---
     float vertices[] = {
         // Posiciones          // Texturas (UV)   // Normales       // Tangentes
         // Cara Frontal
-        -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
-         0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
-         0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, 0.8f,   1.0f, 0.0f, 0.0f,
+        -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,   0.0f, 0.5f, 0.8f,    1.0f, 0.0f, 0.0f,
+         0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   0.0f, 0.5f, 0.8f,    1.0f, 0.0f, 0.0f,
+         0.0f, 0.8f,  0.0f,    0.5f, 1.0f,   0.0f, 0.5f, 0.8f,    1.0f, 0.0f, 0.0f,
          // Cara Derecha
-          0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
-          0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
-          0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.8f, 0.5f, 0.0f,   0.0f, 0.0f, -1.0f,
+          0.5f, 0.0f,  0.5f,    0.0f, 0.0f,   0.8f, 0.5f, 0.0f,    0.0f, 0.0f, -1.0f,
+          0.5f, 0.0f, -0.5f,    1.0f, 0.0f,   0.8f, 0.5f, 0.0f,    0.0f, 0.0f, -1.0f,
+          0.0f, 0.8f,  0.0f,    0.5f, 1.0f,   0.8f, 0.5f, 0.0f,    0.0f, 0.0f, -1.0f,
           // Cara Trasera
-           0.5f, 0.0f, -0.5f,    0.0f, 0.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
-          -0.5f, 0.0f, -0.5f,    1.0f, 0.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
-           0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  0.0f, 0.5f, -0.8f, -1.0f, 0.0f, 0.0f,
+           0.5f, 0.0f, -0.5f,    0.0f, 0.0f,   0.0f, 0.5f, -0.8f,  -1.0f, 0.0f, 0.0f,
+          -0.5f, 0.0f, -0.5f,    1.0f, 0.0f,   0.0f, 0.5f, -0.8f,  -1.0f, 0.0f, 0.0f,
+           0.0f, 0.8f,  0.0f,    0.5f, 1.0f,   0.0f, 0.5f, -0.8f,  -1.0f, 0.0f, 0.0f,
            // Cara Izquierda
-           -0.5f, 0.0f, -0.5f,    0.0f, 0.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
-           -0.5f, 0.0f,  0.5f,    1.0f, 0.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
-            0.0f, 0.8f,  0.0f,    0.5f, 1.0f, -0.8f, 0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
+           -0.5f, 0.0f, -0.5f,    0.0f, 0.0f,  -0.8f, 0.5f, 0.0f,    0.0f, 0.0f, 1.0f,
+           -0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  -0.8f, 0.5f, 0.0f,    0.0f, 0.0f, 1.0f,
+            0.0f, 0.8f,  0.0f,    0.5f, 1.0f,  -0.8f, 0.5f, 0.0f,    0.0f, 0.0f, 1.0f,
             // Base 
-            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-             0.5f, 0.0f, -0.5f,    1.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-            -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,
-            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f
+            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f, -0.5f,    1.0f, 1.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+             0.5f, 0.0f,  0.5f,    1.0f, 0.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+            -0.5f, 0.0f,  0.5f,    0.0f, 0.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f,
+            -0.5f, 0.0f, -0.5f,    0.0f, 1.0f,   0.0f, -1.0f, 0.0f,   1.0f, 0.0f, 0.0f
     };
 
     GLuint VAO, VBO;
@@ -253,13 +167,13 @@ int main() {
     stbi_image_free(dataNormal);
 
     // --- RUTAS DE CÁMARA (BÉZIER) ---
-    glm::vec3 p0(-4.0f, 2.0f, 4.0f);   // Punto de inicio (lejos y a la izquierda)
-    glm::vec3 p1(0.0f, 4.0f, 5.0f);    // Punto de control 1 (curva hacia arriba)
-    glm::vec3 p2(4.0f, 0.5f, 2.0f);    // Punto de control 2 (baja y se acerca por la derecha)
-    glm::vec3 p3(1.5f, -0.2f, 1.5f);   // Punto final (muy cerca de la cara del zorro)
+    glm::vec3 p0(-4.0f, 2.0f, 4.0f);
+    glm::vec3 p1(0.0f, 4.0f, 5.0f);
+    glm::vec3 p2(4.0f, 0.5f, 2.0f);
+    glm::vec3 p3(1.5f, -0.2f, 1.5f);
 
-    float bezierTime = 0.0f;           // Progreso de la curva (0.0 a 1.0)
-    bool playIntro = true;             // Interruptor para la cinemática
+    float bezierTime = 0.0f;
+    bool playIntro = true;
 
     // --- LOOP PRINCIPAL ---
     while (!glfwWindowShouldClose(window)) {
@@ -269,23 +183,19 @@ int main() {
 
         // Cámara
         if (playIntro) {
-            // Avanzar el tiempo (velocidad de la cámara)
-            bezierTime += 0.2f * deltaTime; // 0.2f es la velocidad, ajústala a tu gusto
+            bezierTime += 0.2f * deltaTime;
 
             if (bezierTime >= 1.0f) {
                 bezierTime = 1.0f;
-                playIntro = false; // Termina la cinemática y te devuelve el control manual
+                playIntro = false;
             }
 
-            // Calcular nueva posición en la curva
             cameraPos = calculateCubicBezier(p0, p1, p2, p3, bezierTime);
 
-            // Obligar a la cámara a mirar al zorro
             glm::vec3 foxTarget(1.5f, -0.5f, 0.0f);
             cameraFront = glm::normalize(foxTarget - cameraPos);
         }
         else {
-
             float cameraSpeed = 2.5f * deltaTime;
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cameraPos += cameraSpeed * cameraFront;
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cameraPos -= cameraSpeed * cameraFront;
@@ -293,37 +203,37 @@ int main() {
             if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
         }
+
         glClearColor(0.07f, 0.13f, 0.17f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glUseProgram(shaderProgram);
+        ourShader.use();
 
         // Actualizar luces y cámara
         glm::vec3 lightPos = cameraPos;
         glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightPos"), lightPos.x, lightPos.y, lightPos.z);
-        glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"), lightColor.x, lightColor.y, lightColor.z);
+        ourShader.setVec3("lightPos", lightPos);
+        ourShader.setVec3("lightColor", lightColor);
 
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.0f / 600.0f, 0.1f, 100.0f);
         glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "view"), 1, GL_FALSE, glm::value_ptr(view));
+        ourShader.setMat4("projection", projection);
+        ourShader.setMat4("view", view);
 
         // ---------------------------------
         // DIBUJAR LA PIRÁMIDE
         // ---------------------------------
         glm::mat4 identity = glm::mat4(1.0f);
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(identity));
+        ourShader.setMat4("model", identity);
 
-        // RESTAURAR LOS UNIFORMS Y TEXTURAS DE LA PIRÁMIDE ESTRICTAMENTE
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, textureDiffuse);
-        glUniform1i(glGetUniformLocation(shaderProgram, "diffuseMap"), 0);
+        ourShader.setInt("diffuseMap", 0);
 
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, textureNormal);
-        glUniform1i(glGetUniformLocation(shaderProgram, "normalMap"), 1);
-        glUniform1i(glGetUniformLocation(shaderProgram, "useNormalMap"), 1); // Avisar que SÍ tiene relieve
+        ourShader.setInt("normalMap", 1);
+        ourShader.setBool("useNormalMap", true);
 
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, 18);
@@ -334,13 +244,12 @@ int main() {
         glm::mat4 foxModel = glm::mat4(1.0f);
         foxModel = glm::translate(foxModel, glm::vec3(1.5f, -0.5f, 0.0f));
         foxModel = glm::scale(foxModel, glm::vec3(0.01f));
-        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_FALSE, glm::value_ptr(foxModel));
+        ourShader.setMat4("model", foxModel);
 
-        // Desvincular textura 1 por seguridad
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        fox.Draw(shaderProgram);
+        fox.Draw(ourShader.ID);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -348,7 +257,7 @@ int main() {
 
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
-    glDeleteProgram(shaderProgram);
+    glDeleteProgram(ourShader.ID);
     glfwTerminate();
     return 0;
 }
